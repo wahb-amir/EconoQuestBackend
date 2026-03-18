@@ -1,0 +1,2 @@
+# Ignore all nested .git folders in services
+**/.git
