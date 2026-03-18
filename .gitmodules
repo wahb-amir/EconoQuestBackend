@@ -1,0 +1,9 @@
+[submodule "hint-service"]
+	path = hint-service
+	url = ./hint-service
+[submodule "proxy-layer"]
+	path = proxy-layer
+	url = ./proxy-layer
+[submodule "summary-service"]
+	path = summary-service
+	url = ./summary-service
