@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import { getPoolStatus } from "../services/loadBalancer.js";
+import { getQueueStatus } from "../services/queue.js";
+import { createClient } from "@supabase/supabase-js";
 
 export async function statusRoutes(app: FastifyInstance) {
   app.get("/health", async () => ({
@@ -9,7 +10,9 @@ export async function statusRoutes(app: FastifyInstance) {
 
   app.get("/api/status", async () => ({
     status: "ok",
-    pool: getPoolStatus(),
+    pool: getQueueStatus(),
     timestamp: new Date().toISOString(),
   }));
+
+
 }

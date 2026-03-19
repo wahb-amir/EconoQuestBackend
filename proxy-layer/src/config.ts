@@ -12,18 +12,16 @@ export const config = {
       process.env.HF_SUMMARY_SPACE_1 ?? "",
       process.env.HF_SUMMARY_SPACE_2 ?? "",
     ],
-    auth_service: [
-     "https://wahb-amir-auth-service.hf.space/health"
-    ]
+    auth: "https://huggingface.co/spaces/wahb-amir/auth-service/health",
   },
 
   cron: {
-    pingInterval: "*/25 * * * *",  // every 25 min
+    pingInterval: "*/25 * * * *",
     timeoutMs: 5000,
   },
 
   lb: {
-    timeoutMs: 15000,   // hint timeout
-    summaryTimeoutMs: 40000,  // summary needs longer — 1.5B model
+    timeoutMs: 15000,
+    summaryTimeoutMs: 40000,
   },
 } as const;

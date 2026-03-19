@@ -101,6 +101,7 @@ async function streamHintToClient(
         if (parsed.type === "token") {
           fullHint += parsed.text;
           send(socket, { type: "token", text: parsed.text });
+          await new Promise(r => setTimeout(r, 40));
         }
         if (parsed.type === "done") {
           send(socket, { type: "done" });

@@ -4,7 +4,8 @@ import { config } from "../config.js";
 const ALL_SPACES = [
   ...config.spaces.hint,
   ...config.spaces.summary,
-];
+  config.spaces.auth,         // ← auth service included
+].filter(Boolean);            // remove empty strings if not set
 
 async function pingAll() {
   console.log(`[cron] pinging ${ALL_SPACES.length} spaces...`);
@@ -28,10 +29,7 @@ async function pingAll() {
 }
 
 export function startHealthCron() {
-  // ping immediately on startup
   pingAll();
-
-  // then every 25 min
   cron.schedule(config.cron.pingInterval, pingAll);
   console.log("[cron] health cron started — interval: 25min");
 }

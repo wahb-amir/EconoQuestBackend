@@ -9,10 +9,6 @@ pinned: false
 
 Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
 
-
-
-
-
 curl https://wahb-amir-hint-service-1.hf.space/health
 curl https://wahb-amir-hint-service-2.hf.space/health
 curl https://wahb-amir-summary-1.hf.space/health
