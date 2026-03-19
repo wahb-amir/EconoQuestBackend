@@ -12,6 +12,9 @@ export const config = {
       process.env.HF_SUMMARY_SPACE_1 ?? "",
       process.env.HF_SUMMARY_SPACE_2 ?? "",
     ],
+    auth_service: [
+     "https://wahb-amir-auth-service.hf.space/health"
+    ]
   },
 
   cron: {

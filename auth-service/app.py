@@ -1,20 +1,20 @@
 import os
 from fastapi import FastAPI, Response, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from dotenv import load_dotenv
-from services.auth import get_supabase
+from services.auth import get_supabase, get_supabase_for_auth
 
 load_dotenv()
 
 app = FastAPI()
 
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://econoquest.wahb.space").strip()
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[FRONTEND_URL],
-    allow_credentials=True,   # required for cookies
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -28,7 +28,7 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str):
         httponly=True,
         secure=True,
         samesite="lax",
-        max_age=3600,        # 1 hour
+        max_age=3600,
         path="/",
     )
     response.set_cookie(
@@ -37,7 +37,7 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str):
         httponly=True,
         secure=True,
         samesite="lax",
-        max_age=604800,      # 7 days
+        max_age=604800,
         path="/",
     )
 
@@ -56,6 +56,10 @@ class RegisterRequest(BaseModel):
     password: str
     username: str | None = None
 
+class SetSessionRequest(BaseModel):
+    access_token:  str
+    refresh_token: str
+
 # ── Routes ────────────────────────────────────────────
 
 @app.get("/health")
@@ -64,20 +68,18 @@ async def health():
 
 @app.post("/auth/register")
 async def register(req: RegisterRequest, response: Response):
-    from services.auth import get_supabase_for_auth
-    supabase = get_supabase_for_auth()  # ← changed
+    supabase = get_supabase_for_auth()
     try:
         result = supabase.auth.admin.create_user({
-            "email":            req.email,
-            "password":         req.password,
-            "email_confirm":    True,   # mark as confirmed immediately
-            "user_metadata":    {"username": req.username or req.email.split("@")[0]}
+            "email":         req.email,
+            "password":      req.password,
+            "email_confirm": True,
+            "user_metadata": {"username": req.username or req.email.split("@")[0]}
         })
 
         if not result.user:
             raise HTTPException(status_code=400, detail="Registration failed")
 
-        # now sign them in to get session tokens
         supabase_anon = get_supabase()
         signin = supabase_anon.auth.sign_in_with_password({
             "email":    req.email,
@@ -101,7 +103,7 @@ async def register(req: RegisterRequest, response: Response):
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-    
+
 @app.post("/auth/login")
 async def login(req: LoginRequest, response: Response):
     supabase = get_supabase()
@@ -128,7 +130,7 @@ async def login(req: LoginRequest, response: Response):
             }
         }
 
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
 @app.post("/auth/logout")
@@ -140,7 +142,7 @@ async def logout(response: Response, request: Request):
         try:
             supabase.auth.admin.sign_out(access_token)
         except:
-            pass  # best effort
+            pass
 
     clear_auth_cookies(response)
     return {"message": "logged_out"}
@@ -176,7 +178,7 @@ async def refresh(request: Request, response: Response):
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         clear_auth_cookies(response)
         raise HTTPException(status_code=401, detail="Session expired")
 
@@ -203,31 +205,53 @@ async def me(request: Request):
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+@app.post("/auth/set-session")
+async def set_session(req: SetSessionRequest, response: Response):
+    supabase = get_supabase()
+    try:
+        result = supabase.auth.get_user(req.access_token)
+        if not result.user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+
+        set_auth_cookies(response, req.access_token, req.refresh_token)
+
+        return {
+            "user": {
+                "id":       result.user.id,
+                "email":    result.user.email,
+                "username": result.user.user_metadata.get(
+                    "username",
+                    result.user.user_metadata.get("full_name", "")
+                ),
+            }
+        }
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
 @app.get("/auth/google")
-async def oauth_google(request: Request):
+async def oauth_google():
     supabase = get_supabase()
     result = supabase.auth.sign_in_with_oauth({
         "provider": "google",
         "options": {
-            "redirect_to": f"{os.getenv('AUTH_SERVICE_URL')}/auth/callback"
+            "redirect_to": f"{FRONTEND_URL}/auth/callback"
         }
     })
     return {"url": result.url}
 
 @app.get("/auth/github")
-async def oauth_github(request: Request):
+async def oauth_github():
     supabase = get_supabase()
     result = supabase.auth.sign_in_with_oauth({
         "provider": "github",
         "options": {
-            "redirect_to": f"{os.getenv('AUTH_SERVICE_URL')}/auth/callback"
+            "redirect_to": f"{FRONTEND_URL}/auth/callback"
         }
     })
     return {"url": result.url}
 
 @app.get("/auth/callback")
 async def oauth_callback(request: Request, response: Response):
-    # Supabase sends code in query params
     code = request.query_params.get("code")
 
     if not code:
@@ -246,7 +270,6 @@ async def oauth_callback(request: Request, response: Response):
             result.session.refresh_token
         )
 
-        # redirect to frontend dashboard
         response.status_code = 302
         response.headers["location"] = f"{FRONTEND_URL}/dashboard"
         return response
