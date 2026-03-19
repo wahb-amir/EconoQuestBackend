@@ -311,3 +311,32 @@ async def oauth_callback(request: Request, response: Response):
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+    
+    
+@app.post("/auth/submit-score")
+async def submit_score(request: Request):
+    access_token = request.cookies.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        result = get_supabase().auth.get_user(access_token)
+        if not result.user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        user = result.user
+    except:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    body = await request.json()
+    supabase = get_supabase_for_auth()
+
+    supabase.rpc("upsert_score", {
+        "p_player_id":   user.id,
+        "p_player_name": user.user_metadata.get("username") or user.user_metadata.get("full_name") or user.email.split("@")[0],
+        "p_nation_name": body.get("nation_name"),
+        "p_difficulty":  body.get("difficulty", "medium"),
+        "p_raw_score":   body.get("raw_score"),
+        "p_archetype":   body.get("archetype", ""),
+    }).execute()
+
+    return {"ok": True}
