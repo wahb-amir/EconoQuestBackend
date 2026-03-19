@@ -1,6 +1,6 @@
-import type { FastifyInstance } from "fastify";
-import WebSocket from "ws";
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { RawData } from "ws";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { hashState } from "../services/Statehash.js";
 import { getCachedHint, setCachedHint } from "../services/cache.js";
 import {
@@ -9,8 +9,10 @@ import {
   markFree,
   enqueue,
   processQueue,
-} from '../services/queue.js'
+} from "../services/queue.js";
 import { config } from "../config.js";
+
+// ── Lazy Supabase client ──────────────────────────────────────────────────────
 
 let _supabase: SupabaseClient | null = null;
 
@@ -21,38 +23,50 @@ function getSupabase(): SupabaseClient {
     }
     _supabase = createClient(
       process.env.SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_KEY
+      process.env.SUPABASE_SERVICE_KEY,
     );
   }
   return _supabase;
 }
 
-// ── Parse cookie header into key/value map ────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function parseCookies(header: string): Record<string, string> {
   return Object.fromEntries(
-    header.split(";").map(c => {
+    header.split(";").map((c) => {
       const [k, ...v] = c.trim().split("=");
       return [k.trim(), v.join("=")];
-    })
+    }),
   );
 }
 
-// ── Stream hint from HF Space → WebSocket client ──────────────────────────────
+function send(socket: any, data: unknown): void {
+  if (socket.readyState === 1) {
+    socket.send(JSON.stringify(data));
+  }
+}
+
+function rawToString(raw: RawData): string {
+  if (Buffer.isBuffer(raw)) return raw.toString("utf8");
+  if (Array.isArray(raw)) return Buffer.concat(raw).toString("utf8");
+  return Buffer.from(raw as ArrayBuffer).toString("utf8");
+}
+
+// ── Stream hint from HF Space → client ───────────────────────────────────────
 
 async function streamHintToClient(
   spaceUrl: string,
-  body:     unknown,
-  ws:       WebSocket
+  body: unknown,
+  socket: any,
 ): Promise<string> {
   const response = await fetch(`${spaceUrl}/hint-stream`, {
-    method:  "POST",
+    method: "POST",
     headers: {
-      "Content-Type":  "application/json",
-      "Authorization": `Bearer ${config.internalToken}`,
-      "Accept":        "text/event-stream",
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${config.internalToken}`,
+      Accept: "text/event-stream",
     },
-    body:   JSON.stringify(body),
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(30_000),
   });
 
@@ -60,10 +74,10 @@ async function streamHintToClient(
     throw new Error(`Hint space returned ${response.status}`);
   }
 
-  const reader  = response.body!.getReader();
+  const reader = response.body!.getReader();
   const decoder = new TextDecoder();
-  let fullHint  = "";
-  let buffer    = "";
+  let fullHint = "";
+  let buffer = "";
 
   while (true) {
     const { done, value } = await reader.read();
@@ -77,22 +91,19 @@ async function streamHintToClient(
       if (!line.startsWith("data: ")) continue;
       try {
         const parsed = JSON.parse(line.slice(6));
-
-        if (parsed.type === "meta" && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type:      "meta",
+        if (parsed.type === "meta") {
+          send(socket, {
+            type: "meta",
             conflicts: parsed.conflicts ?? [],
-            chunks:    parsed.chunks_used ?? [],
-          }));
+            chunks: parsed.chunks_used ?? [],
+          });
         }
-
-        if (parsed.type === "token" && ws.readyState === WebSocket.OPEN) {
+        if (parsed.type === "token") {
           fullHint += parsed.text;
-          ws.send(JSON.stringify({ type: "token", text: parsed.text }));
+          send(socket, { type: "token", text: parsed.text });
         }
-
-        if (parsed.type === "done" && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: "done" }));
+        if (parsed.type === "done") {
+          send(socket, { type: "done" });
         }
       } catch {
         // malformed SSE chunk — skip
@@ -103,18 +114,16 @@ async function streamHintToClient(
   return fullHint;
 }
 
-// ── Stream cached hint word by word ───────────────────────────────────────────
+// ── Stream cached hint word by word ──────────────────────────────────────────
 
-async function streamCachedHint(hint: string, ws: WebSocket): Promise<void> {
+async function streamCachedHint(hint: string, socket: any): Promise<void> {
   const words = hint.split(" ");
   for (const word of words) {
-    if (ws.readyState !== WebSocket.OPEN) break;
-    ws.send(JSON.stringify({ type: "token", text: word + " " }));
-    await new Promise(r => setTimeout(r, 35));
+    if (socket.readyState !== 1) break;
+    send(socket, { type: "token", text: word + " " });
+    await new Promise((r) => setTimeout(r, 35));
   }
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: "done" }));
-  }
+  send(socket, { type: "done" });
 }
 
 // ── WebSocket route ───────────────────────────────────────────────────────────
@@ -122,110 +131,170 @@ async function streamCachedHint(hint: string, ws: WebSocket): Promise<void> {
 export async function wsHintRoutes(app: FastifyInstance) {
   await app.register(import("@fastify/websocket"));
 
-  app.get("/ws/hint", { websocket: true }, async (ws, req) => {
+  app.get(
+    "/ws/hint",
+    { websocket: true },
+    async (connection: any, req: FastifyRequest) => {
+      // @fastify/websocket v8 — raw socket is at connection.socket
+      const socket = connection.socket ?? connection;
 
-    ws.send(JSON.stringify({ type: "connected" }));
+      // ── Ping keepalive — HF proxy drops idle WS after ~30s ───────────────
+      const pingInterval = setInterval(() => {
+        if (socket.readyState === 1) {
+          socket.ping();
+        } else {
+          clearInterval(pingInterval);
+        }
+      }, 20_000);
 
-    ws.on("message", async (raw: Buffer) => {
+      send(socket, { type: "connected" });
 
-      // ── 1. Parse message ────────────────────────────────────────────────
-      let state: Record<string, unknown>;
-      try {
-        const msg = JSON.parse(raw.toString());
-        state = msg.state;
-        if (!state || typeof state !== "object") throw new Error("Missing state");
-      } catch {
-        ws.send(JSON.stringify({ type: "error", message: "Invalid message format" }));
-        return;
-      }
+      socket.on("message", async (raw: RawData) => {
+        const text = rawToString(raw).trim();
 
-      // ── 2. Verify JWT from cookie (sent automatically on WS upgrade) ────
-      const cookieHeader = req.headers.cookie ?? "";
-      const cookies      = parseCookies(cookieHeader);
-      const accessToken  = cookies["access_token"];
+        // ignore empty messages
+        if (!text) return;
 
-      if (!accessToken) {
-        ws.send(JSON.stringify({ type: "error", message: "Unauthorized — please sign in" }));
-        return;
-      }
-
-      let userId: string;
-      try {
-        const { data, error } = await getSupabase().auth.getUser(accessToken);
-        if (error || !data.user) throw new Error("Invalid token");
-        userId = data.user.id;
-      } catch {
-        ws.send(JSON.stringify({ type: "error", message: "Session expired — please sign in again" }));
-        return;
-      }
-
-      // ── 3. Hash state → check LRU cache ─────────────────────────────────
-      const cacheKey = hashState(state);
-      const cached   = await getCachedHint(cacheKey);
-
-      if (cached) {
-        ws.send(JSON.stringify({ type: "cache_hit" }));
-        await streamCachedHint(cached, ws);
-        return;
-      }
-
-      const requestBody = { state };
-
-      // ── 4. Pick free Space or queue ──────────────────────────────────────
-      const freeSpace = getFreeSpace();
-
-      if (freeSpace) {
-        markBusy(freeSpace.id);
-        ws.send(JSON.stringify({ type: "processing" }));
-
+        // handle client ping
         try {
-          const fullHint = await streamHintToClient(freeSpace.url, requestBody, ws);
-          setCachedHint(cacheKey, fullHint, state).catch(() => {});
-        } catch (err: any) {
-          console.error("[ws/hint] stream error:", err.message);
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-              type:    "error",
-              message: `Advisor error: ${err.message ?? "Unknown"}`,
-            }));
+          const peek = JSON.parse(text);
+          if (peek?.type === "ping") {
+            send(socket, { type: "pong" });
+            return;
           }
-        } finally {
-          markFree(freeSpace.id);
-          processQueue();
+        } catch {
+          // not a ping — continue
         }
 
-      } else {
-        // both Spaces busy — queue
-        await new Promise<void>((resolve) => {
-          const position = enqueue({ ws, body: requestBody, cacheKey, userId, resolve });
-          ws.send(JSON.stringify({ type: "queued", position }));
-        });
+        console.log("[ws/hint] received:", text.substring(0, 120));
 
-        // resumed when space-free callback fires
-        const nowFree = getFreeSpace();
-        if (nowFree && ws.readyState === WebSocket.OPEN) {
-          markBusy(nowFree.id);
-          ws.send(JSON.stringify({ type: "processing" }));
+        // 1. Parse state
+        let msg: any;
+        let state: Record<string, unknown>;
+        try {
+          msg = JSON.parse(text);
+          state = msg.state;
+          if (!state || typeof state !== "object") 
+            throw new Error("Missing state");
+        } catch (e: any) {
+          console.error("[ws/hint] parse error:", e.message);
+          send(socket, { type: "error", message: "Invalid message format" });
+          return;
+        }
+
+        // 2. Verify JWT from cookie
+
+        const cookieHeader = req.headers.cookie ?? "";
+        const cookies = parseCookies(cookieHeader);
+
+        // token can come from cookie (same-domain) or message payload (cross-domain)
+        const accessToken =
+          cookies["access_token"] || ((msg as any).token as string);
+
+        if (!accessToken) {
+          send(socket, {
+            type: "error",
+            message: "Unauthorized — please sign in",
+          });
+          return;
+        }
+
+        let userId: string;
+        try {
+          const { data, error } = await getSupabase().auth.getUser(accessToken);
+          if (error || !data.user) throw new Error("Invalid token");
+          userId = data.user.id;
+        } catch {
+          send(socket, {
+            type: "error",
+            message: "Session expired — please sign in again",
+          });
+          return;
+        }
+
+        // 3. Hash state → check LRU cache
+        const cacheKey = hashState(state);
+        const cached = await getCachedHint(cacheKey);
+
+        if (cached) {
+          send(socket, { type: "cache_hit" });
+          await streamCachedHint(cached, socket);
+          return;
+        }
+
+        const requestBody = { state };
+
+        // 4. Pick free Space or queue
+        const freeSpace = getFreeSpace();
+
+        if (freeSpace) {
+          markBusy(freeSpace.id);
+          send(socket, { type: "processing" });
 
           try {
-            const fullHint = await streamHintToClient(nowFree.url, requestBody, ws);
+            const fullHint = await streamHintToClient(
+              freeSpace.url,
+              requestBody,
+              socket,
+            );
             setCachedHint(cacheKey, fullHint, state).catch(() => {});
           } catch (err: any) {
-            if (ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({
-                type:    "error",
-                message: `Advisor error: ${err.message ?? "Unknown"}`,
-              }));
-            }
+            console.error("[ws/hint] stream error:", err.message);
+            send(socket, {
+              type: "error",
+              message: `Advisor error: ${err.message ?? "Unknown"}`,
+            });
           } finally {
-            markFree(nowFree.id);
+            markFree(freeSpace.id);
             processQueue();
           }
-        }
-      }
-    });
+        } else {
+          // both Spaces busy — queue
+          await new Promise<void>((resolve) => {
+            const position = enqueue({
+              ws: socket,
+              body: requestBody,
+              cacheKey,
+              userId,
+              resolve,
+            });
+            send(socket, { type: "queued", position });
+          });
 
-    ws.on("close", () => console.log("[ws/hint] client disconnected"));
-    ws.on("error", (err) => console.error("[ws/hint] socket error:", err.message));
-  });
+          const nowFree = getFreeSpace();
+          if (nowFree && socket.readyState === 1) {
+            markBusy(nowFree.id);
+            send(socket, { type: "processing" });
+
+            try {
+              const fullHint = await streamHintToClient(
+                nowFree.url,
+                requestBody,
+                socket,
+              );
+              setCachedHint(cacheKey, fullHint, state).catch(() => {});
+            } catch (err: any) {
+              send(socket, {
+                type: "error",
+                message: `Advisor error: ${err.message ?? "Unknown"}`,
+              });
+            } finally {
+              markFree(nowFree.id);
+              processQueue();
+            }
+          }
+        }
+      });
+
+      socket.on("close", () => {
+        clearInterval(pingInterval);
+        console.log("[ws/hint] client disconnected");
+      });
+
+      socket.on("error", (err: Error) => {
+        clearInterval(pingInterval);
+        console.error("[ws/hint] socket error:", err.message);
+      });
+    },
+  );
 }

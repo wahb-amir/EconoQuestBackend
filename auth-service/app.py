@@ -11,15 +11,23 @@ app = FastAPI()
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://econoquest.wahb.space").strip()
 
+# allow all origins that need to send cookies to this service
+ALLOWED_ORIGINS = [
+    FRONTEND_URL,
+    "http://localhost:3000",
+    "http://localhost:3001",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,   # ← CRITICAL: must be True for cookies to be sent
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["Set-Cookie"],  # ← allows browser to see Set-Cookie header
 )
 
-# ── Cookie helper ─────────────────────────────────────
+# ── Cookie helper ─────────────────────────────────────────────────────────────
 
 def set_auth_cookies(response: Response, access_token: str, refresh_token: str):
     response.set_cookie(
@@ -27,7 +35,7 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str):
         value=access_token,
         httponly=True,
         secure=True,
-        samesite="lax",
+        samesite="none",   # ← changed from "lax" to "none" for cross-domain
         max_age=3600,
         path="/",
     )
@@ -36,16 +44,22 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str):
         value=refresh_token,
         httponly=True,
         secure=True,
-        samesite="lax",
+        samesite="none",   # ← changed from "lax" to "none" for cross-domain
         max_age=604800,
         path="/",
     )
 
 def clear_auth_cookies(response: Response):
-    response.delete_cookie("access_token", path="/")
-    response.delete_cookie("refresh_token", path="/")
+    response.delete_cookie(
+        "access_token", path="/",
+        secure=True, samesite="none"
+    )
+    response.delete_cookie(
+        "refresh_token", path="/",
+        secure=True, samesite="none"
+    )
 
-# ── Models ────────────────────────────────────────────
+# ── Models ────────────────────────────────────────────────────────────────────
 
 class LoginRequest(BaseModel):
     email:    str
@@ -60,7 +74,7 @@ class SetSessionRequest(BaseModel):
     access_token:  str
     refresh_token: str
 
-# ── Routes ────────────────────────────────────────────
+# ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
 async def health():
@@ -204,6 +218,27 @@ async def me(request: Request):
         }
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+@app.get("/auth/token")
+async def get_token(request: Request):
+    """
+    Returns the access token from the httpOnly cookie in the response body.
+    Used by frontend to get the token for cross-domain WebSocket auth.
+    Requires credentials: 'include' on the fetch call.
+    """
+    access_token = request.cookies.get("access_token")
+
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        result = get_supabase().auth.get_user(access_token)
+        if not result.user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    return {"access_token": access_token}
 
 @app.post("/auth/set-session")
 async def set_session(req: SetSessionRequest, response: Response):
