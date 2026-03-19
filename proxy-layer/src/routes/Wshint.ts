@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import WebSocket from "ws";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { hashState } from "../services/Statehash.js";
 import { getCachedHint, setCachedHint } from "../services/cache.js";
 import {
@@ -12,10 +12,20 @@ import {
 } from '../services/queue.js'
 import { config } from "../config.js";
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!
-);
+let _supabase: SupabaseClient | null = null;
+
+function getSupabase(): SupabaseClient {
+  if (!_supabase) {
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+      throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_KEY");
+    }
+    _supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY
+    );
+  }
+  return _supabase;
+}
 
 // ── Parse cookie header into key/value map ────────────────────────────────────
 
@@ -141,7 +151,7 @@ export async function wsHintRoutes(app: FastifyInstance) {
 
       let userId: string;
       try {
-        const { data, error } = await supabase.auth.getUser(accessToken);
+        const { data, error } = await getSupabase().auth.getUser(accessToken);
         if (error || !data.user) throw new Error("Invalid token");
         userId = data.user.id;
       } catch {
