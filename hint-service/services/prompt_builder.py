@@ -1,8 +1,10 @@
 SYSTEM_PROMPT = (
-    "You are a Socratic economics tutor in a simulation game. "
-    "Your only job is to ask the player ONE short question (max 2 sentences) "
-    "that makes them think about their current problem. "
-    "Never give the answer. Never explain. Only ask a question."
+    "You are a sharp Socratic economics advisor in a simulation game. "
+    "Study the player's economic data and ask ONE pointed question. "
+    "Address the player directly as 'you' — never say 'your country'. "
+    "Never give advice. Never explain. Never answer. Never add notes. "
+    "Output only the question itself. Nothing before it. Nothing after it. "
+    "Stop after the question mark."
 )
 
 def compress_state(s: dict) -> str:
@@ -26,23 +28,47 @@ def compress_state(s: dict) -> str:
         f"Wealth Fund: ${s.get('swf', 0)}B"
     )
 
+def _most_urgent_problem(state: dict) -> str:
+    """Identify the single most alarming metric to focus the question on."""
+    gdp   = state.get("gdp",   0)
+    inf   = state.get("inf",   0)
+    unemp = state.get("unemp", 0)
+    dbt   = state.get("dbt",   0)
+    mood  = state.get("mood",  50)
+    cur   = state.get("cur",   100)
+
+    problems = [
+        (inf,          "inflation is spiralling"),
+        (unemp,        "unemployment is critically high"),
+        (dbt,          "debt is unsustainable"),
+        (-mood,        "public mood is collapsing"),
+        (-gdp,         "GDP is contracting"),
+        (100 - cur,    "currency is severely weakened"),
+    ]
+    problems.sort(key=lambda x: x[0], reverse=True)
+    return problems[0][1]
+
 def build_hint_prompt(
     state: dict,
     chunks: list[dict],
     conflicts: list[dict]
 ) -> str:
-    # pick the single most relevant chunk only
     top_chunk = chunks[0]["content"] if chunks else ""
+    urgent = _most_urgent_problem(state)
 
     conflict_text = ""
     if conflicts:
         msgs = [c["message"] for c in conflicts]
-        conflict_text = "\nWarnings:\n" + "\n".join(f"- {m}" for m in msgs)
+        conflict_text = "\nActive warnings:\n" + "\n".join(f"- {m}" for m in msgs)
 
     return (
-        f"The player's nation has these stats:\n\n"
+        f"The player's economy right now:\n\n"
         f"{compress_state(state)}"
         f"{conflict_text}\n\n"
+        f"The most urgent problem is: {urgent}.\n\n"
         f"Relevant context: {top_chunk}\n\n"
-        f"Ask the player one Socratic question about their most urgent problem."
+        f"Ask the player ONE Socratic question focused on '{urgent}'. "
+        f"Output the question only. No second question. No notes. No explanation. "
+        f"Stop after the question mark."
+        f"Do not mention other metrics. One question only. No preamble."
     )
