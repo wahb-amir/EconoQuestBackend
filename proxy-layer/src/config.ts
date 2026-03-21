@@ -21,7 +21,7 @@ export const config = {
   },
 
   lb: {
-    timeoutMs: 15000,
-    summaryTimeoutMs: 40000,
-  },
+  timeoutMs: 30_000,        
+  summaryTimeoutMs: 30_000, 
+}
 } as const;

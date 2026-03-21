@@ -1,6 +1,6 @@
 import { config } from "../config.js";
 
-const MAX_CONCURRENT = 2; // max requests per space at once
+const MAX_CONCURRENT = 10; // max requests per space at once
 
 interface SpaceState {
   url:      string;
