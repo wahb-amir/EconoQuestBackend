@@ -2,6 +2,7 @@ from groq import Groq
 import os
 import re
 from typing import Generator
+from services.prompt_builder import SYSTEM_PROMPT
 
 client = Groq(api_key=os.environ["GROQ_API_KEY"])
 MODEL_ID = "llama-3.3-70b-versatile"

@@ -14,14 +14,13 @@ from services.embeddings import embed_state, get_model
 from services.retrieval import retrieve_chunks
 from services.conflict_detector import detect_conflicts
 from services.prompt_builder import build_hint_prompt
-from services.inference import generate_hint, generate_hint_stream, load_model
+from services.inference import generate_hint, generate_hint_stream
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("[startup] preloading models...")
+    print("[startup] preloading embedding model...")
     get_model()
-    load_model()
-    print("[startup] all models ready")
+    print("[startup] ready")
     yield
     print("[shutdown] done")
 
@@ -73,12 +72,11 @@ async def hint(
     embedding  = embed_state(state_dict)
     chunks     = retrieve_chunks(embedding, count=3)
     prompt     = build_hint_prompt(state_dict, chunks, conflicts)
-    result     = generate_hint(prompt)
+    hint_text  = generate_hint(prompt)
 
     return {
-        "hint":        result["hint"],
+        "hint":        hint_text,
         "conflicts":   conflicts,
-        "usage":       result["usage"],
         "chunks_used": [c["chunk_key"] for c in chunks],
     }
 
@@ -94,7 +92,6 @@ async def hint_stream(
     prompt     = build_hint_prompt(state_dict, chunks, conflicts)
 
     def token_generator():
-        # metadata first
         meta = json.dumps({
             "type":        "meta",
             "conflicts":   conflicts,
@@ -102,12 +99,10 @@ async def hint_stream(
         })
         yield f"data: {meta}\n\n"
 
-        # stream tokens
         for word in generate_hint_stream(prompt):
             chunk = json.dumps({"type": "token", "text": word})
             yield f"data: {chunk}\n\n"
 
-        # done
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return StreamingResponse(
