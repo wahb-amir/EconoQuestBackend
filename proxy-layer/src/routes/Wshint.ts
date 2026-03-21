@@ -65,9 +65,13 @@ async function streamHintToClient(
       "Content-Type": "application/json",
       Authorization: `Bearer ${config.internalToken}`,
       Accept: "text/event-stream",
+      // Prevent every proxy layer from buffering the response
+      "Cache-Control": "no-cache",
+      "X-Accel-Buffering": "no",   // disables nginx buffering on HF side
+      Connection: "keep-alive",
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(60_000), // raised: model can be slow to start
   });
 
   if (!response.ok) {
@@ -78,37 +82,73 @@ async function streamHintToClient(
   const decoder = new TextDecoder();
   let fullHint = "";
   let buffer = "";
+  let firstTokenSent = false;
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
 
     buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
 
-    for (const line of lines) {
+    // Split on double-newline (proper SSE event boundary) so we never
+    // process a partial event, while still handling single-\n servers.
+    const parts = buffer.split(/\n\n|\r\n\r\n/);
+    buffer = parts.pop() ?? ""; // last chunk may be incomplete
+
+    for (const part of parts) {
+      // Each part may contain multiple "data:" lines (multi-line event)
+      for (const line of part.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        try {
+          const parsed = JSON.parse(line.slice(6));
+
+          if (parsed.type === "meta") {
+            send(socket, {
+              type: "meta",
+              conflicts: parsed.conflicts ?? [],
+              chunks: parsed.chunks_used ?? [],
+            });
+          }
+
+          if (parsed.type === "token") {
+            fullHint += parsed.text;
+
+            // Tell the client we're live on the very first token so it can
+            // clear any "waiting…" spinner immediately.
+            if (!firstTokenSent) {
+              firstTokenSent = true;
+              send(socket, { type: "streaming" });
+            }
+
+            // Forward token immediately — no artificial delay.
+            // Real inter-token gaps from the model are the natural pacing.
+            send(socket, { type: "token", text: parsed.text });
+          }
+
+          if (parsed.type === "done") {
+            send(socket, { type: "done" });
+          }
+        } catch {
+          // malformed SSE chunk — skip
+        }
+      }
+    }
+  }
+
+  // Flush any remaining buffer content (server that omits trailing \n\n)
+  if (buffer.trim()) {
+    for (const line of buffer.split("\n")) {
       if (!line.startsWith("data: ")) continue;
       try {
         const parsed = JSON.parse(line.slice(6));
-        if (parsed.type === "meta") {
-          send(socket, {
-            type: "meta",
-            conflicts: parsed.conflicts ?? [],
-            chunks: parsed.chunks_used ?? [],
-          });
-        }
         if (parsed.type === "token") {
           fullHint += parsed.text;
           send(socket, { type: "token", text: parsed.text });
-          await new Promise(r => setTimeout(r, 40));
         }
         if (parsed.type === "done") {
           send(socket, { type: "done" });
         }
-      } catch {
-        // malformed SSE chunk — skip
-      }
+      } catch { /* skip */ }
     }
   }
 
@@ -175,7 +215,7 @@ export async function wsHintRoutes(app: FastifyInstance) {
         try {
           msg = JSON.parse(text);
           state = msg.state;
-          if (!state || typeof state !== "object") 
+          if (!state || typeof state !== "object")
             throw new Error("Missing state");
         } catch (e: any) {
           console.error("[ws/hint] parse error:", e.message);
@@ -184,7 +224,6 @@ export async function wsHintRoutes(app: FastifyInstance) {
         }
 
         // 2. Verify JWT from cookie
-
         const cookieHeader = req.headers.cookie ?? "";
         const cookies = parseCookies(cookieHeader);
 
