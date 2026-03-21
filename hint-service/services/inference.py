@@ -26,7 +26,7 @@ def load_model():
 
 
 
-def generate_hint_stream(prompt: str) -> Generator[str, None, None]:
+def generate_hint(prompt: str) -> Generator[str, None, None]:
     tokenizer, model = load_model()
 
     messages = [
