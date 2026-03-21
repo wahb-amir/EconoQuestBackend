@@ -1,11 +1,12 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from functools import lru_cache
-import torch
+from groq import Groq
+from services.embeddings import embed_state
+from services.retrieval import retrieve_chunks
+import os
 import re
 
-MODEL_ID = "Qwen/Qwen2.5-1.5B-Instruct"
-MAX_NEW_TOKENS = 80
-PROMPT_VERSION = "v3"  # bump this whenever prompt changes to bust cache
+client = Groq(api_key=os.environ["GROQ_API_KEY"])
+MODEL_ID = "llama-3.3-70b-versatile"
+PROMPT_VERSION = "v4"
 
 FOCUS_ROTATION = [
     "inflation",
@@ -18,75 +19,55 @@ FOCUS_ROTATION = [
     "GDP",
 ]
 
-@lru_cache(maxsize=1)
-def load_model():
-    print(f"[inference] loading {MODEL_ID}...")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_ID,
-        torch_dtype=torch.float32,
-        device_map="cpu",
-        low_cpu_mem_usage=True,
-    )
-    model.eval()
-    print("[inference] model ready")
-    return tokenizer, model
-
-def generate_round_summary(round_num: int, state: dict) -> str:
-    tokenizer, model = load_model()
-
+def _build_summary_prompt(round_num: int, state: dict, chunks: list[dict]) -> str:
     focus = FOCUS_ROTATION[(round_num - 1) % len(FOCUS_ROTATION)]
 
-    prompt = (
-        f"[{PROMPT_VERSION}] Round {round_num} results: "
+    # pick most relevant chunk — prefer layer 3 (extreme conditions) and 5 (history)
+    context = ""
+    if chunks:
+        preferred = next(
+            (c for c in chunks if c.get("layer") in (3, 5)), chunks[0]
+        )
+        context = f"Context: {preferred['content']}\n"
+
+    return (
+        f"[{PROMPT_VERSION}] Round {round_num} economic results:\n"
         f"GDP={state.get('gdp')}% Inflation={state.get('inf')}% "
         f"Unemployment={state.get('unemp')}% Debt={state.get('dbt')}% "
         f"Mood={state.get('mood')} Innovation={state.get('inn')} "
-        f"Currency={state.get('cur')} Printed={'yes' if state.get('prt') else 'no'}. "
-        f"Focus specifically on {focus} this round. "
-        f"One sentence only. Do not use the words: indicating, signaling, "
-        f"reflecting, despite, amid. Write like a newspaper headline."
-        f"This is a fictional economics game. Only reference the numbers provided. "
-        f"Do not reference real-world events, pandemics, wars, or history. "
-        f"Focus specifically on {focus} this round. "
+        f"Currency={state.get('cur')} Printed={'yes' if state.get('prt') else 'no'}.\n"
+        f"{context}"
+        f"Write one sharp sentence focused on {focus}. "
+        f"Use the actual numbers. Reference the context if relevant. "
+        f"This is a fictional game — do not reference real-world events directly, "
+        f"but you may draw loose parallels if the context mentions them."
     )
 
-    messages = [
+def generate_round_summary(round_num: int, state: dict) -> str:
+    # RAG pipeline
+    embedding = embed_state(state)
+    chunks    = retrieve_chunks(embedding, count=3)
+    prompt    = _build_summary_prompt(round_num, state, chunks)
+
+    response = client.chat.completions.create(
+    model=MODEL_ID,
+    messages=[
         {
             "role": "system",
             "content": (
-                "You are a blunt economic advisor in an economics game. "
-                "Each round you pick ONE metric and write one sharp sentence about it. "
-                "Never start two rounds the same way. "
-                "Forbidden words: indicating, signaling, reflecting, despite, amid. "
-                "One sentence only. No filler."
+                "You are a blunt economic advisor summarizing one round of an economics game. "
+                "Write exactly one sentence. Maximum 20 words. "
+                "Never start with 'With'. Never start two summaries the same way. "
+                "Use the actual numbers. Be direct. "
+                "Forbidden words: indicating, signaling, reflecting, despite, amid, reminiscent, echoes, poses."
             )
         },
         {"role": "user", "content": prompt}
-    ]
+    ],
+    max_tokens=60, 
+    temperature=0.7,
+)
 
-    text = tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
-    )
-
-    inputs = tokenizer(
-        text, return_tensors="pt",
-        truncation=True, max_length=200
-    )
-
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=MAX_NEW_TOKENS,
-            do_sample=True,         # greedy was causing identical outputs
-            temperature=0.7,
-            top_p=0.9,
-            pad_token_id=tokenizer.eos_token_id,
-            repetition_penalty=1.3,
-        )
-
-    new_tokens = outputs[0][inputs["input_ids"].shape[1]:]
-    raw = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
-
+    raw = response.choices[0].message.content.strip()
     sentences = re.split(r"(?<=[.!?])\s+", raw)
     return sentences[0].strip() if sentences else raw

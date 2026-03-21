@@ -10,7 +10,8 @@ load_dotenv()
 
 from services.auth import verify_internal_token
 from services.archetype import classify_archetype
-from services.inference import generate_round_summary, load_model
+from services.inference import generate_round_summary
+from services.embeddings import get_model
 
 def get_supabase():
     return create_client(
@@ -20,8 +21,8 @@ def get_supabase():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("[startup] preloading model...")
-    load_model()
+    print("[startup] preloading embedding model...")
+    get_model()
     print("[startup] ready")
     yield
 
