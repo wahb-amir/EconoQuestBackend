@@ -4,6 +4,7 @@ emoji: 🚀
 colorFrom: blue
 colorTo: red
 sdk: docker
+proxy_timeout: 290
 pinned: false
 ---
 

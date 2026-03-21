@@ -1,11 +1,22 @@
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from functools import lru_cache
 import torch
-import json
 import re
 
 MODEL_ID = "Qwen/Qwen2.5-1.5B-Instruct"
-MAX_NEW_TOKENS = 80   # was 300 — one sentence output only now
+MAX_NEW_TOKENS = 80
+PROMPT_VERSION = "v3"  # bump this whenever prompt changes to bust cache
+
+FOCUS_ROTATION = [
+    "inflation",
+    "unemployment",
+    "debt",
+    "public mood",
+    "currency",
+    "trade balance",
+    "innovation",
+    "GDP",
+]
 
 @lru_cache(maxsize=1)
 def load_model():
@@ -24,20 +35,32 @@ def load_model():
 def generate_round_summary(round_num: int, state: dict) -> str:
     tokenizer, model = load_model()
 
-    # single round — tiny prompt, tiny output
+    focus = FOCUS_ROTATION[(round_num - 1) % len(FOCUS_ROTATION)]
+
     prompt = (
-        f"Round {round_num} results: "
+        f"[{PROMPT_VERSION}] Round {round_num} results: "
         f"GDP={state.get('gdp')}% Inflation={state.get('inf')}% "
         f"Unemployment={state.get('unemp')}% Debt={state.get('dbt')}% "
         f"Mood={state.get('mood')} Innovation={state.get('inn')} "
         f"Currency={state.get('cur')} Printed={'yes' if state.get('prt') else 'no'}. "
-        f"Write one sentence describing the key economic outcome this round."
+        f"Focus specifically on {focus} this round. "
+        f"One sentence only. Do not use the words: indicating, signaling, "
+        f"reflecting, despite, amid. Write like a newspaper headline."
+        f"This is a fictional economics game. Only reference the numbers provided. "
+        f"Do not reference real-world events, pandemics, wars, or history. "
+        f"Focus specifically on {focus} this round. "
     )
 
     messages = [
         {
             "role": "system",
-            "content": "You are a concise economic analyst. Respond in exactly one sentence."
+            "content": (
+                "You are a blunt economic advisor in an economics game. "
+                "Each round you pick ONE metric and write one sharp sentence about it. "
+                "Never start two rounds the same way. "
+                "Forbidden words: indicating, signaling, reflecting, despite, amid. "
+                "One sentence only. No filler."
+            )
         },
         {"role": "user", "content": prompt}
     ]
@@ -48,22 +71,22 @@ def generate_round_summary(round_num: int, state: dict) -> str:
 
     inputs = tokenizer(
         text, return_tensors="pt",
-        truncation=True, max_length=200  # tiny input
+        truncation=True, max_length=200
     )
 
     with torch.no_grad():
         outputs = model.generate(
             **inputs,
             max_new_tokens=MAX_NEW_TOKENS,
-            do_sample=False,      # greedy
+            do_sample=True,         # greedy was causing identical outputs
+            temperature=0.7,
+            top_p=0.9,
             pad_token_id=tokenizer.eos_token_id,
-            repetition_penalty=1.2,
-            # removed top_p and top_k — incompatible with do_sample=False
+            repetition_penalty=1.3,
         )
 
     new_tokens = outputs[0][inputs["input_ids"].shape[1]:]
     raw = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
-    # cap at 1 sentence
     sentences = re.split(r"(?<=[.!?])\s+", raw)
     return sentences[0].strip() if sentences else raw

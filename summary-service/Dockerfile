@@ -11,7 +11,7 @@ EXPOSE 7860
 
 ENV HF_HOME=/app/.cache
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860", "--timeout-keep-alive", "290"]
 
 
 
