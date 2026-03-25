@@ -4,9 +4,9 @@ import { config } from "../config.js";
 // ── Space state ───────────────────────────────────────────────────────────────
 
 export interface SpaceState {
-  id:      string;
-  url:     string;
-  busy:    boolean;
+  id: string;
+  url: string;
+  busy: boolean;
   healthy: boolean;
 }
 
@@ -16,32 +16,32 @@ export const hintSpaces: SpaceState[] = [
 ];
 
 export function getFreeSpace(): SpaceState | null {
-  return hintSpaces.find(s => !s.busy && s.healthy) ?? null;
+  return hintSpaces.find((s) => !s.busy && s.healthy) ?? null;
 }
 
 export function markBusy(spaceId: string): void {
-  const s = hintSpaces.find(s => s.id === spaceId);
+  const s = hintSpaces.find((s) => s.id === spaceId);
   if (s) s.busy = true;
 }
 
 export function markFree(spaceId: string): void {
-  const s = hintSpaces.find(s => s.id === spaceId);
+  const s = hintSpaces.find((s) => s.id === spaceId);
   if (s) s.busy = false;
 }
 
 export function markHealthy(spaceId: string, healthy: boolean): void {
-  const s = hintSpaces.find(s => s.id === spaceId);
+  const s = hintSpaces.find((s) => s.id === spaceId);
   if (s) s.healthy = healthy;
 }
 
 // ── Request queue ─────────────────────────────────────────────────────────────
 
 export interface QueuedRequest {
-  ws:       WebSocket;
-  body:     unknown;
+  ws: WebSocket;
+  body: unknown;
   cacheKey: string;
-  userId:   string;
-  resolve:  () => void;
+  userId: string;
+  resolve: () => void;
 }
 
 const queue: QueuedRequest[] = [];
@@ -73,7 +73,7 @@ export function processQueue(): void {
 
 export function getQueueStatus() {
   return {
-    spaces:      hintSpaces.map(({ id, busy, healthy }) => ({ id, busy, healthy })),
+    spaces: hintSpaces.map(({ id, busy, healthy }) => ({ id, busy, healthy })),
     queueLength: queue.length,
   };
 }

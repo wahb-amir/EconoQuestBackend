@@ -3,7 +3,6 @@ import { markFree, processQueue, getQueueStatus } from "../services/queue.js";
 import { config } from "../config.js";
 
 export async function internalRoutes(app: FastifyInstance) {
-
   // called by HF Space when it finishes processing a request
   app.post("/internal/space-free", async (request, reply) => {
     const auth = request.headers.authorization;
@@ -20,7 +19,9 @@ export async function internalRoutes(app: FastifyInstance) {
     processQueue();
 
     const status = getQueueStatus();
-    console.log(`[internal] ${space_id} marked free — queue: ${status.queueLength}`);
+    console.log(
+      `[internal] ${space_id} marked free — queue: ${status.queueLength}`,
+    );
 
     return reply.send({ ok: true, queue: status.queueLength });
   });

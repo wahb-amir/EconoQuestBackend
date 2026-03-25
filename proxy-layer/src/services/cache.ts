@@ -5,7 +5,7 @@ const MAX_CACHE_SIZE = 500;
 function getSupabase() {
   return createClient(
     process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_KEY!
+    process.env.SUPABASE_SERVICE_KEY!,
   );
 }
 
@@ -21,11 +21,15 @@ export async function getCachedHint(cacheKey: string): Promise<string | null> {
     if (!data) return null;
 
     // update last_used + hits in background
-    (supabase
-      .from("econoquest_hint_cache")
-      .update({ last_used: new Date().toISOString(), hits: (data.hits ?? 1) + 1 })
-      .eq("cache_key", cacheKey) as any)
-      .catch(() => {});
+    (
+      supabase
+        .from("econoquest_hint_cache")
+        .update({
+          last_used: new Date().toISOString(),
+          hits: (data.hits ?? 1) + 1,
+        })
+        .eq("cache_key", cacheKey) as any
+    ).catch(() => {});
 
     return data.hint as string;
   } catch {
@@ -34,9 +38,9 @@ export async function getCachedHint(cacheKey: string): Promise<string | null> {
 }
 
 export async function setCachedHint(
-  cacheKey:      string,
-  hint:          string,
-  stateSnapshot: Record<string, unknown>
+  cacheKey: string,
+  hint: string,
+  stateSnapshot: Record<string, unknown>,
 ): Promise<void> {
   try {
     const supabase = getSupabase();
@@ -62,14 +66,16 @@ export async function setCachedHint(
       }
     }
 
-    await supabase.from("econoquest_hint_cache").upsert({
-      cache_key:      cacheKey,
-      hint,
-      state_snapshot: stateSnapshot,
-      last_used:      new Date().toISOString(),
-      hits:           1,
-    }, { onConflict: "cache_key" });
-
+    await supabase.from("econoquest_hint_cache").upsert(
+      {
+        cache_key: cacheKey,
+        hint,
+        state_snapshot: stateSnapshot,
+        last_used: new Date().toISOString(),
+        hits: 1,
+      },
+      { onConflict: "cache_key" },
+    );
   } catch (err) {
     console.error("[cache] setCachedHint error:", err);
   }

@@ -49,23 +49,31 @@ def generate_round_summary(round_num: int, state: dict) -> str:
     chunks    = retrieve_chunks(embedding, count=3)
     prompt    = _build_summary_prompt(round_num, state, chunks)
 
+    # Updated API Call Settings
     response = client.chat.completions.create(
     model=MODEL_ID,
     messages=[
         {
             "role": "system",
             "content": (
-                "You are a blunt economic advisor summarizing one round of an economics game. "
-                "Write exactly one sentence. Maximum 20 words. "
-                "Never start with 'With'. Never start two summaries the same way. "
-                "Use the actual numbers. Be direct. "
-                "Forbidden words: indicating, signaling, reflecting, despite, amid, reminiscent, echoes, poses."
+                "You are a blunt, data-driven Senior Economic Advisor. "
+                "Analyze the round data and provide exactly two punchy sentences. "
+                "Sentence 1: Link a player action directly to a specific metric shift using raw numbers. "
+                "Sentence 2: Issue a cynical warning or a strategic pivot. "
+                "\n\nSTRICT CONSTRAINTS:\n"
+                "- Focus on the 'Golden Triangle': GDP Growth, CPI (Inflation), and Unemployment. "
+                "- Ignore total debt unless it causes a specific credit crisis. "
+                "- Use specific percentages and absolute numbers. "
+                "- Never start with 'With', 'The', 'In', or 'Your'. "
+                "- Forbidden words: indicating, signaling, reflecting, despite, amid, reminiscent, echoes, poses, transition, multifaceted, context."
             )
         },
         {"role": "user", "content": prompt}
     ],
-    max_tokens=60, 
-    temperature=0.7,
+    max_tokens=120, 
+    temperature=0.8,        # Higher temp allows for more 'cynical' creative flair
+    presence_penalty=0.6,   # Encourages the model to talk about new topics/metrics
+    frequency_penalty=0.5,  # Strictly prevents repetitive sentence structures
 )
 
     raw = response.choices[0].message.content.strip()

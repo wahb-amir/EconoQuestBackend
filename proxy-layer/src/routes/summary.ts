@@ -7,7 +7,7 @@ function getSupabase() {
   if (!_supabase) {
     _supabase = createClient(
       process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_KEY!
+      process.env.SUPABASE_SERVICE_KEY!,
     );
   }
   return _supabase;
@@ -21,10 +21,10 @@ async function verifyRequest(request: FastifyRequest): Promise<boolean> {
     const cookieHeader = request.headers.cookie ?? "";
 
     const cookies = Object.fromEntries(
-      cookieHeader.split(";").map(c => {
+      cookieHeader.split(";").map((c) => {
         const [k, ...v] = c.trim().split("=");
         return [k.trim(), v.join("=")];
-      })
+      }),
     );
 
     const token =
@@ -42,13 +42,16 @@ async function verifyRequest(request: FastifyRequest): Promise<boolean> {
 }
 
 export async function summaryRoutes(app: FastifyInstance) {
-
   app.post("/api/game/round-summary", async (request, reply) => {
     const ok = await verifyRequest(request);
     if (!ok) return reply.status(401).send({ error: "Unauthorized" });
 
     try {
-      const { data } = await forwardToSpace("summary", "/round-summary", request.body);
+      const { data } = await forwardToSpace(
+        "summary",
+        "/round-summary",
+        request.body,
+      );
       return reply.send(data);
     } catch (err: any) {
       return reply.status(500).send({ error: err.message });
@@ -60,7 +63,11 @@ export async function summaryRoutes(app: FastifyInstance) {
     if (!ok) return reply.status(401).send({ error: "Unauthorized" });
 
     try {
-      const { data } = await forwardToSpace("summary", "/summary", request.body);
+      const { data } = await forwardToSpace(
+        "summary",
+        "/summary",
+        request.body,
+      );
       return reply.send(data);
     } catch (err: any) {
       return reply.status(500).send({ error: err.message });

@@ -5,7 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 export async function statusRoutes(app: FastifyInstance) {
   app.get("/health", async () => ({
     status: "ok",
-    service: "proxy"
+    service: "proxy",
   }));
 
   app.get("/api/status", async () => ({
@@ -13,6 +13,4 @@ export async function statusRoutes(app: FastifyInstance) {
     pool: getQueueStatus(),
     timestamp: new Date().toISOString(),
   }));
-
-
 }

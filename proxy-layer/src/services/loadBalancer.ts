@@ -1,44 +1,48 @@
 import { config } from "../config.js";
 
-const MAX_CONCURRENT = 10; // max requests per space at once
+const MAX_CONCURRENT = 60;
 
 interface SpaceState {
-  url:      string;
-  healthy:  boolean;
+  url: string;
+  healthy: boolean;
   requests: number;
 }
 
 const pools: Record<"hint" | "summary", SpaceState[]> = {
-  hint: config.spaces.hint.map(url => ({
-    url, healthy: true, requests: 0
+  hint: config.spaces.hint.map((url) => ({
+    url,
+    healthy: true,
+    requests: 0,
   })),
-  summary: config.spaces.summary.map(url => ({
-    url, healthy: true, requests: 0
+  summary: config.spaces.summary.map((url) => ({
+    url,
+    healthy: true,
+    requests: 0,
   })),
 };
 
 // Pick a space that is healthy AND under the concurrency cap
 function pick(service: "hint" | "summary"): SpaceState | null {
   const available = pools[service].filter(
-    s => s.healthy && s.requests < MAX_CONCURRENT
+    (s) => s.healthy && s.requests < MAX_CONCURRENT,
   );
   if (available.length === 0) return null;
   // pick the one with fewest active requests
-  return available.reduce((a, b) => a.requests <= b.requests ? a : b);
+  return available.reduce((a, b) => (a.requests <= b.requests ? a : b));
 }
 
 async function refreshHealth(service: "hint" | "summary"): Promise<void> {
   await Promise.allSettled(
-    pools[service].map(async s => {
+    pools[service].map(async (s) => {
       try {
         const r = await fetch(`${s.url}/health`, {
-          signal: AbortSignal.timeout(3000)
+          signal: AbortSignal.timeout(3000),
         });
         s.healthy = r.ok;
       } catch {
         s.healthy = false;
       }
-    })
+    }),
   );
 }
 
@@ -53,8 +57,8 @@ async function callSpace(
     const res = await fetch(`${space.url}${path}`, {
       method: "POST",
       headers: {
-        "Content-Type":  "application/json",
-        "Authorization": `Bearer ${config.internalToken}`,
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.internalToken}`,
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
@@ -77,11 +81,10 @@ async function callSpace(
 export async function forwardToSpace(
   service: "hint" | "summary",
   path: string,
-  body: unknown
+  body: unknown,
 ): Promise<{ data: unknown; spaceUsed: string }> {
-  const timeoutMs = service === "summary"
-    ? config.lb.summaryTimeoutMs
-    : config.lb.timeoutMs;
+  const timeoutMs =
+    service === "summary" ? config.lb.summaryTimeoutMs : config.lb.timeoutMs;
 
   await refreshHealth(service);
 
@@ -98,7 +101,7 @@ export async function forwardToSpace(
 
   // primary full or failed — try any other available space
   const fallback = pools[service].find(
-    s => s.url !== primary?.url && s.healthy && s.requests < MAX_CONCURRENT
+    (s) => s.url !== primary?.url && s.healthy && s.requests < MAX_CONCURRENT,
   );
 
   if (fallback) {
@@ -108,13 +111,23 @@ export async function forwardToSpace(
 
   throw new Error(
     `All ${service} spaces are full or unhealthy — ` +
-    pools[service].map(s => `${s.url}: ${s.requests} reqs, healthy=${s.healthy}`).join(" | ")
+      pools[service]
+        .map((s) => `${s.url}: ${s.requests} reqs, healthy=${s.healthy}`)
+        .join(" | "),
   );
 }
 
 export function getPoolStatus() {
   return {
-    hint:    pools.hint.map(({ url, healthy, requests }) => ({ url, healthy, requests })),
-    summary: pools.summary.map(({ url, healthy, requests }) => ({ url, healthy, requests })),
+    hint: pools.hint.map(({ url, healthy, requests }) => ({
+      url,
+      healthy,
+      requests,
+    })),
+    summary: pools.summary.map(({ url, healthy, requests }) => ({
+      url,
+      healthy,
+      requests,
+    })),
   };
 }

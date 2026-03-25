@@ -16,33 +16,39 @@ await app.register(cors, { origin: true });
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 await app.register(rateLimit, {
-  global:     true,
-  max:        60,          // 60 requests per window per IP
+  global: true,
+  max: 60, // 60 requests per window per IP
   timeWindow: "1 minute",
   keyGenerator: (request) =>
-    request.headers["x-forwarded-for"]?.toString().split(",")[0].trim()
-    ?? request.ip,
+    request.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ??
+    request.ip,
   errorResponseBuilder: (_request, context) => ({
     statusCode: 429,
-    error:      "Too Many Requests",
-    message:    `Rate limit exceeded. Try again in ${Math.ceil(context.ttl / 1000)}s.`,
+    error: "Too Many Requests",
+    message: `Rate limit exceeded. Try again in ${Math.ceil(context.ttl / 1000)}s.`,
   }),
 });
 
 // tighter limit on AI hint endpoint specifically
 app.addHook("onRoute", (routeOptions) => {
-  if (routeOptions.url === "/api/game/hint" || routeOptions.url === "/ws/hint") {
+  if (
+    routeOptions.url === "/api/game/hint" ||
+    routeOptions.url === "/ws/hint"
+  ) {
     routeOptions.config = {
       rateLimit: {
-        max:        10,          // 10 hint requests per minute per IP
+        max: 10, // 10 hint requests per minute per IP
         timeWindow: "1 minute",
       },
     };
   }
-  if (routeOptions.url === "/api/game/round-summary" || routeOptions.url === "/api/game/final-summary") {
+  if (
+    routeOptions.url === "/api/game/round-summary" ||
+    routeOptions.url === "/api/game/final-summary"
+  ) {
     routeOptions.config = {
       rateLimit: {
-        max:        20,
+        max: 20,
         timeWindow: "1 minute",
       },
     };

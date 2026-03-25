@@ -67,7 +67,7 @@ async function streamHintToClient(
       Accept: "text/event-stream",
       // Prevent every proxy layer from buffering the response
       "Cache-Control": "no-cache",
-      "X-Accel-Buffering": "no",   // disables nginx buffering on HF side
+      "X-Accel-Buffering": "no", // disables nginx buffering on HF side
       Connection: "keep-alive",
     },
     body: JSON.stringify(body),
@@ -148,7 +148,9 @@ async function streamHintToClient(
         if (parsed.type === "done") {
           send(socket, { type: "done" });
         }
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
   }
 
