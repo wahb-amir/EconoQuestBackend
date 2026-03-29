@@ -9,7 +9,7 @@ pinned: false
 ---
 # EconoQuest — Summary Service
 
-FastAPI inference service that generates per-round economic summaries and classifies player archetypes at game end. Uses Qwen2.5-1.5B-Instruct. Deployed as two identical instances on HuggingFace Spaces for load balancing.
+FastAPI inference service that generates per-round economic summaries and classifies player archetypes at game end. Uses llama 3.3 70b. Deployed as two identical instances on HuggingFace Spaces for load balancing.
 
 ## Responsibilities
 
