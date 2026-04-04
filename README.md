@@ -60,7 +60,7 @@ FastAPI RAG inference service that generates Socratic economic questions using G
 ---
 
 ### 3. **Summary Service** (`/summary-service` — 2 instances)
-FastAPI inference service that generates per-round economic analyses and classifies player archetypes at game end using Qwen2.5-1.5B-Instruct.
+FastAPI inference service that generates per-round economic analyses and classifies player archetypes at game end using Llama 3.3 70B.
 
 **Key Responsibilities:**
 - Generate 1-sentence economic analysis per game round
